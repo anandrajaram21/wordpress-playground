@@ -580,6 +580,13 @@ function defaultSqliteJournalMode(options: BootRequestHandlerOptions) {
  * Checks if WordPress is installed by checking if the wp-load.php file exists
  * and if the blog is installed.
  *
+ * WordPress is loaded with SHORTINIT so that only the core and the database
+ * layer are booted. A fatal error in a plugin or theme (e.g. a syntax error
+ * in functions.php) must not prevent Playground from booting – otherwise
+ * the user cannot reach the file browser to fix it.
+ *
+ * @see https://github.com/WordPress/wordpress-playground/issues/3243
+ *
  * @param php - The PHP instance to check.
  * @returns True if WordPress is installed, false otherwise.
  */
@@ -592,6 +599,7 @@ export async function isWordPressInstalled(php: PHP) {
 				echo '-1';
 				exit;
 			}
+			define('SHORTINIT', true);
 			require $wp_load;
 			ob_clean();
 			echo is_blog_installed() ? '1' : '0';
@@ -702,6 +710,8 @@ async function isDatabaseConnectionValid(php: PHP) {
 				echo '-1';
 				exit;
 			}
+			// Only the database layer is needed. See isWordPressInstalled().
+			define('SHORTINIT', true);
 			require $wp_load;
 			ob_clean();
 			echo $wpdb->check_connection( false ) ? '1' : '0';

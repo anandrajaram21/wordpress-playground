@@ -78,15 +78,16 @@ echo $pdo->query("SELECT option_value FROM wp_options WHERE option_name = 'playg
 									source.readFileAsBuffer(discoveryPath)
 								);
 							}
-							php.mkdir('/wordpress/wp-content/mu-plugins');
+							// Drop-ins load before the boot checks stop
+							// loading WordPress, so this fails the boot.
 							php.writeFile(
-								'/wordpress/wp-content/mu-plugins/broken.php',
-								'<?php throw new Exception("A saved plugin failed");'
+								'/wordpress/wp-content/object-cache.php',
+								'<?php throw new Exception("A saved drop-in failed");'
 							);
 						},
 					},
 				})
-			).rejects.toThrow('A saved plugin failed');
+			).rejects.toThrow('A saved drop-in failed');
 
 			const php = await reopened.getPrimaryPhp();
 			expect(await getSqliteDatabasePath(php)).toBe(path);
