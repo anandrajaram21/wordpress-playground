@@ -44,6 +44,55 @@ describe('Blueprints', () => {
 		);
 	});
 
+	it('continues after an unresolvable plugin when onError is skip-plugin', async () => {
+		await runBlueprintV1Steps(
+			await compileBlueprintV1({
+				steps: [
+					{
+						step: 'installPlugin',
+						pluginData: {
+							resource: 'vfs',
+							path: '/missing-plugin.zip',
+						},
+						options: { onError: 'skip-plugin' },
+					},
+					{
+						step: 'writeFile',
+						path: '/after-skipped-plugin.txt',
+						data: 'reached',
+					},
+				],
+			}),
+			php
+		);
+		expect(php.fileExists('/after-skipped-plugin.txt')).toBe(true);
+	});
+
+	it('aborts on an unresolvable plugin by default', async () => {
+		await expect(
+			runBlueprintV1Steps(
+				await compileBlueprintV1({
+					steps: [
+						{
+							step: 'installPlugin',
+							pluginData: {
+								resource: 'vfs',
+								path: '/missing-plugin.zip',
+							},
+						},
+						{
+							step: 'writeFile',
+							path: '/after-failed-plugin.txt',
+							data: 'reached',
+						},
+					],
+				}),
+				php
+			)
+		).rejects.toThrow();
+		expect(php.fileExists('/after-failed-plugin.txt')).toBe(false);
+	});
+
 	it('writes an inline file tree without a resource property', async () => {
 		const blueprint = {
 			steps: [

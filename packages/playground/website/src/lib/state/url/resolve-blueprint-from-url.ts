@@ -6,6 +6,7 @@ import type {
 } from '@wp-playground/client';
 import {
 	getBlueprintDeclaration,
+	getPluginShorthandReference,
 	isBlueprintBundle,
 	resolveRemoteBlueprint,
 } from '@wp-playground/client';
@@ -132,8 +133,17 @@ export async function resolveBlueprintFromURL(
 		// via the hash fragment (#{...}) or via the `blueprint-url` query param.
 		return {
 			blueprint: {
-				plugins: query.getAll('plugin'),
 				steps: [
+					// A plugin that cannot be installed, e.g. because of a mistyped
+					// slug, must not prevent the remaining plugins from installing.
+					...query.getAll('plugin').map(
+						(plugin) =>
+							({
+								step: 'installPlugin',
+								pluginData: getPluginShorthandReference(plugin),
+								options: { onError: 'skip-plugin' },
+							}) as StepDefinition
+					),
 					importWxrQueryArg &&
 						/^(http(s?)):\/\//i.test(importWxrQueryArg) &&
 						({

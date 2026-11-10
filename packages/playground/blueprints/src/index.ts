@@ -19,6 +19,7 @@ export {
 	InvalidBlueprintError,
 	BlueprintStepExecutionError,
 	validateBlueprint,
+	getPluginShorthandReference,
 
 	// BC:
 	compileBlueprintV1 as compileBlueprint,

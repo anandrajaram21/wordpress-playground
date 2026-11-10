@@ -14,6 +14,7 @@ import {
 	type Blueprint,
 	type OnStepCompleted,
 	type GitDirectoryReference,
+	type StepDefinition,
 	BlueprintFilesystemRequiredError,
 	InvalidBlueprintError,
 	isBlueprintBundle,
@@ -26,6 +27,7 @@ import { getRemoteUrl } from '../../config';
 import {
 	setActiveModal,
 	setActiveSiteError,
+	setDockOperationNotice,
 	setGitHubAuthRepoUrl,
 } from './slice-ui';
 import type { PlaygroundDispatch, PlaygroundReduxState } from './store';
@@ -238,7 +240,15 @@ export function bootSiteClient(
 		// step this boot runs, so it can be persisted into site metadata and
 		// surfaced as a badge in the Files browser.
 		const gitDirectorySources: Record<string, GitDirectoryReference> = {};
+		// Collects the plugins the Blueprint skipped after failing to install
+		// them, so the user learns about them once the site is ready.
+		const skippedPlugins: string[] = [];
 		const onBlueprintStepCompleted: OnStepCompleted = (result, step) => {
+			const skippedPlugin = getSkippedPluginName(step, result);
+			if (skippedPlugin) {
+				skippedPlugins.push(skippedPlugin);
+				return;
+			}
 			const extracted = extractGitDirectorySource(step, result);
 			if (!extracted) {
 				return;
@@ -382,6 +392,19 @@ export function bootSiteClient(
 			return;
 		}
 		const connectedPlayground = playground as PlaygroundClient;
+
+		if (skippedPlugins.length > 0) {
+			dispatch(
+				setDockOperationNotice({
+					status: 'error',
+					title:
+						skippedPlugins.length === 1
+							? 'Couldn’t install a plugin'
+							: 'Couldn’t install some plugins',
+					message: `Skipped: ${skippedPlugins.join(', ')}. Check the plugin name and your connection, then reload to try again.`,
+				})
+			);
+		}
 
 		if (Object.keys(gitDirectorySources).length > 0) {
 			try {
@@ -607,6 +630,35 @@ export function bootSiteClient(
  * but before deleting the previous WordPress files. Boot must still honor that
  * persisted marker or it can mount files that do not match `wp-runtime.json`.
  */
+/**
+ * Names the plugin of an installPlugin step that asked to be skipped on failure
+ * and completed without installing anything.
+ */
+function getSkippedPluginName(
+	step: StepDefinition,
+	result: unknown
+): string | undefined {
+	if (
+		step.step !== 'installPlugin' ||
+		step.options?.onError !== 'skip-plugin' ||
+		result !== undefined
+	) {
+		return undefined;
+	}
+	const reference = step.pluginData as {
+		slug?: string;
+		url?: string;
+		inner?: { url?: string };
+	};
+	return (
+		step.options.humanReadableName ??
+		reference.slug ??
+		reference.url ??
+		reference.inner?.url ??
+		'unknown plugin'
+	);
+}
+
 async function finishPendingOpfsSiteRemoval({
 	siteSlug,
 	dispatch,

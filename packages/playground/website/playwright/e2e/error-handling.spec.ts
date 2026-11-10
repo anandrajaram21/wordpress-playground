@@ -40,11 +40,22 @@ test('should show download error modal when a resource download fails', async ({
 		} as typeof fetch;
 	});
 
-	// The ?plugin param adds an installPlugin blueprint step that
-	// fetches the zip from downloads.wordpress.org via the CORS
-	// proxy, triggering the resource-download-failed error through
-	// the normal pipeline.
-	await page.goto('./?storage=temp&plugin=hello-dolly');
+	// The installPlugin step fetches the zip from downloads.wordpress.org
+	// via the CORS proxy, triggering the resource-download-failed error
+	// through the normal pipeline. The ?plugin param would skip the plugin
+	// instead of failing.
+	const blueprint = {
+		steps: [
+			{
+				step: 'installPlugin',
+				pluginData: {
+					resource: 'wordpress.org/plugins',
+					slug: 'hello-dolly',
+				},
+			},
+		],
+	};
+	await page.goto(`./?storage=temp#${JSON.stringify(blueprint)}`);
 
 	const title = page.getByText('Could not download required files');
 	await expect(title).toBeVisible();

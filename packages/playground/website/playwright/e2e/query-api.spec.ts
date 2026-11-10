@@ -406,6 +406,23 @@ test('should install the specified plugin', async ({ website, wordpress }) => {
 	);
 });
 
+test('should install the plugins listed after a plugin that does not exist', async ({
+	website,
+	wordpress,
+	page,
+}) => {
+	await website.goto(
+		'./?storage=temp&plugin=playground-nonexistent-plugin-slug&plugin=html-api-debugger&url=/wp-admin/plugins.php'
+	);
+	await expect(
+		wordpress.locator('#deactivate-html-api-debugger')
+	).toContainText('Deactivate');
+	// The skipped plugin is reported instead of being dropped silently.
+	await expect(
+		page.getByRole('group', { name: 'Operation failed' })
+	).toContainText('playground-nonexistent-plugin-slug');
+});
+
 test('should install the specified theme', async ({ website, wordpress }) => {
 	await website.goto(
 		'./?storage=temp&theme=twentytwentyone&url=/wp-admin/themes.php'

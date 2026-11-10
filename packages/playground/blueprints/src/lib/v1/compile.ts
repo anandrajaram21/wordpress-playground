@@ -252,31 +252,11 @@ function compileBlueprintJson(
 		// Translate an array of strings into a map of pluginName => true to
 		// install the latest version of the plugin from wordpress.org
 		const steps = blueprint.plugins
-			.map((value) => {
-				if (typeof value === 'string') {
-					if (seemsLikeGitRepoUrl(value)) {
-						return {
-							resource: 'zip',
-							inner: {
-								resource: 'git:directory',
-								url: value.trim().replace(/\/+$/, ''),
-								ref: 'HEAD',
-							},
-						} as FileReference;
-					} else if (value.startsWith('https://')) {
-						return {
-							resource: 'url',
-							url: value,
-						} as FileReference;
-					} else {
-						return {
-							resource: 'wordpress.org/plugins',
-							slug: value,
-						} as FileReference;
-					}
-				}
-				return value;
-			})
+			.map((value) =>
+				typeof value === 'string'
+					? getPluginShorthandReference(value)
+					: value
+			)
 			.map((resource) => ({
 				step: 'installPlugin',
 				pluginData: resource,
@@ -472,6 +452,34 @@ function compileBlueprintJson(
 			}
 		},
 	};
+}
+
+/**
+ * Resolves a string from the `plugins` Blueprint shorthand to the resource it stands for.
+ *
+ * @param value A wordpress.org plugin slug, a git repository URL, or a zip file URL.
+ * @returns The resource reference to pass as `pluginData` to the `installPlugin` step.
+ */
+export function getPluginShorthandReference(value: string): FileReference {
+	if (seemsLikeGitRepoUrl(value)) {
+		return {
+			resource: 'zip',
+			inner: {
+				resource: 'git:directory',
+				url: value.trim().replace(/\/+$/, ''),
+				ref: 'HEAD',
+			},
+		} as FileReference;
+	} else if (value.startsWith('https://')) {
+		return {
+			resource: 'url',
+			url: value,
+		} as FileReference;
+	}
+	return {
+		resource: 'wordpress.org/plugins',
+		slug: value,
+	} as FileReference;
 }
 
 function formatValidationErrors(
@@ -721,9 +729,25 @@ function compileStep<S extends StepDefinition>(
 				stepProgress.setCaption(step.progress.caption);
 			}
 			stepProgress.fillSlowly();
+			let resolvedArgs;
+			try {
+				resolvedArgs = await resolveArguments(args);
+			} catch (error) {
+				// The step handler applies `onError`, but it never runs when a resource
+				// cannot be resolved, e.g. when a plugin slug does not exist.
+				if (!skipsFailedInstallation(step)) {
+					throw error;
+				}
+				logger.warn(
+					`Skipping the ${step.step} step after failure: ${
+						error instanceof Error ? error.message : String(error)
+					}`
+				);
+				return;
+			}
 			return await keyedStepHandlers[step.step](
 				playground,
-				await resolveArguments(args),
+				resolvedArgs,
 				{
 					tracker: stepProgress,
 					initialCaption: step.progress?.caption,
@@ -749,6 +773,20 @@ function compileStep<S extends StepDefinition>(
 	}
 
 	return { run, step, resources };
+}
+
+/**
+ * Determines if a step asks to be skipped when the plugin or theme cannot be installed.
+ *
+ * @param step The step definition to test.
+ * @returns Whether a failure of the step should be skipped.
+ */
+function skipsFailedInstallation(step: StepDefinition): boolean {
+	return (
+		(step.step === 'installPlugin' &&
+			step.options?.onError === 'skip-plugin') ||
+		(step.step === 'installTheme' && step.options?.onError === 'skip-theme')
+	);
 }
 
 /**
