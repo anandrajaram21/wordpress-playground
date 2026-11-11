@@ -248,10 +248,12 @@ add_action('admin_head', 'playground_legacy_preview_windows');
 add_action('wp_head', 'playground_legacy_preview_windows', 2);
 
 /**
- * Adds target="_blank" to external links when clicked to open them in a new tab.
- * This prevents users from loading non-Playground pages inside the Playground iframe.
+ * Retargets links so they open where they work best in Playground.
+ *
+ * External links get target="_blank" to open in a new tab. This prevents users from
+ * loading non-Playground pages inside the Playground iframe.
  */
-function playground_add_target_blank_to_external_links() {
+function playground_retarget_links() {
 	// Only run on frontend and admin pages, not during AJAX requests or CLI
 	if (empty($_SERVER['REQUEST_URI']) || (function_exists('wp_doing_ajax') && wp_doing_ajax()) || (function_exists('wp_doing_cron') && wp_doing_cron())) {
 		return;
@@ -259,21 +261,20 @@ function playground_add_target_blank_to_external_links() {
 
 	?>
 	<script>
-		function addTargetBlankToExternalLinks() {
-			function addTargetBlank(a) {
+		function retargetPlaygroundLinks() {
+			function retargetLink(a) {
 				const url = new URL(a.href, location);
 				if (url.origin !== location.origin) {
 					a.target = '_blank';
 				}
 			}
 
-			// Set target="_blank" for existing external links – this
-			// covers keyboard navigation.
+			// Retarget existing links – this covers keyboard navigation.
 			document.querySelectorAll('a[href]').forEach(a => {
-				addTargetBlank(a);
+				retargetLink(a);
 			});
 
-			// Set target="_blank" for external links when clicked.
+			// Retarget links when clicked.
 			// This covers links that are added after the page has loaded.
 			document.addEventListener('click', e => {
 				// window, document, SVG Text nodes etc. don't have the `closest` method
@@ -282,7 +283,7 @@ function playground_add_target_blank_to_external_links() {
 				}
 				const a = e.target.closest('a[href]');
 				if (!a) return;
-				addTargetBlank(a);
+				retargetLink(a);
 			});
 
 			// Also handle focus events to cover keyboard navigation on
@@ -294,21 +295,21 @@ function playground_add_target_blank_to_external_links() {
 				}
 				const a = e.target?.closest('a[href]');
 				if (!a) return;
-				addTargetBlank(a);
+				retargetLink(a);
 			}, true);
 		}
 
 		if (document.readyState === 'loading') {
-			document.addEventListener('DOMContentLoaded', addTargetBlankToExternalLinks);
+			document.addEventListener('DOMContentLoaded', retargetPlaygroundLinks);
 		} else {
-			addTargetBlankToExternalLinks();
+			retargetPlaygroundLinks();
 		}
 	</script>
 
 	<?php
 }
-add_action('wp_head', 'playground_add_target_blank_to_external_links');
-add_action('admin_head', 'playground_add_target_blank_to_external_links');
+add_action('wp_head', 'playground_retarget_links');
+add_action('admin_head', 'playground_retarget_links');
 
 /**
  * Report the WordPress URL so the app can update its address bar without reading this frame.
