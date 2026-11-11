@@ -248,10 +248,16 @@ add_action('admin_head', 'playground_legacy_preview_windows');
 add_action('wp_head', 'playground_legacy_preview_windows', 2);
 
 /**
- * Retargets links so they open where they work best in Playground.
+ * Retargets links so they open where they work best in Playground:
  *
- * External links get target="_blank" to open in a new tab. This prevents users from
- * loading non-Playground pages inside the Playground iframe.
+ * - External links get target="_blank" to open in a new tab. This prevents users from
+ *   loading non-Playground pages inside the Playground iframe.
+ * - Same-origin links with target="_blank", such as the Site Editor's "View site" or
+ *   the post editor's "View Post", open inside the Playground iframe. A new tab would
+ *   show the WordPress page without the Playground UI around it. Modified clicks
+ *   (e.g. Cmd/Ctrl+click) still open a new tab.
+ *
+ * @see https://github.com/WordPress/wordpress-playground/issues/2838
  */
 function playground_retarget_links() {
 	// Only run on frontend and admin pages, not during AJAX requests or CLI
@@ -262,10 +268,17 @@ function playground_retarget_links() {
 	?>
 	<script>
 		function retargetPlaygroundLinks() {
+			const isInPlaygroundFrame = window.parent !== window;
 			function retargetLink(a) {
 				const url = new URL(a.href, location);
 				if (url.origin !== location.origin) {
 					a.target = '_blank';
+				} else if (
+					isInPlaygroundFrame &&
+					a.target === '_blank' &&
+					!a.hasAttribute('download')
+				) {
+					a.target = '_self';
 				}
 			}
 
