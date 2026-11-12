@@ -248,10 +248,20 @@ add_action('admin_head', 'playground_legacy_preview_windows');
 add_action('wp_head', 'playground_legacy_preview_windows', 2);
 
 /**
- * Adds target="_blank" to external links when clicked to open them in a new tab.
- * This prevents users from loading non-Playground pages inside the Playground iframe.
+ * Retargets links so they open where they work best in Playground:
+ *
+ * - External links get target="_blank" to open in a new tab. This prevents users from
+ *   loading non-Playground pages inside the Playground iframe.
+ * - Prototype: same-origin links with target="_blank", such as the Site Editor's
+ *   "View site" or the post editor's "View Post", open in a tab inside Playground. A
+ *   browser tab would show the WordPress page without the Playground UI around it.
+ *   The click posts playground-open-tab to remote.html, which loads the URL in another
+ *   WordPress frame. Modified clicks (e.g. Cmd/Ctrl+click) still open a browser tab.
+ *
+ * @see https://github.com/WordPress/wordpress-playground/issues/2838
+ * @see packages/playground/remote/src/lib/wordpress-tabs.ts
  */
-function playground_add_target_blank_to_external_links() {
+function playground_retarget_links() {
 	// Only run on frontend and admin pages, not during AJAX requests or CLI
 	if (empty($_SERVER['REQUEST_URI']) || (function_exists('wp_doing_ajax') && wp_doing_ajax()) || (function_exists('wp_doing_cron') && wp_doing_cron())) {
 		return;
@@ -259,21 +269,41 @@ function playground_add_target_blank_to_external_links() {
 
 	?>
 	<script>
-		function addTargetBlankToExternalLinks() {
-			function addTargetBlank(a) {
+		function retargetPlaygroundLinks() {
+			const parentOrigin = <?php echo json_encode(defined('PLAYGROUND_PARENT_ORIGIN') ? PLAYGROUND_PARENT_ORIGIN : null); ?> || window.location.origin;
+			function retargetLink(a) {
 				const url = new URL(a.href, location);
 				if (url.origin !== location.origin) {
 					a.target = '_blank';
 				}
 			}
 
-			// Set target="_blank" for existing external links – this
-			// covers keyboard navigation.
+			/**
+			 * Whether this click would open a same-origin page in a new browser tab.
+			 *
+			 * remote.html confirms the pointer relay only for the documents it hosts
+			 * directly, so that marker also tells us it will receive playground-open-tab.
+			 * Without it (a standalone page or a nested frame), keep the browser's behavior.
+			 */
+			function opensInPlaygroundTab(e, a) {
+				return (
+					window.parent !== window &&
+					document.documentElement.hasAttribute('data-playground-pointer-relay') &&
+					a.target === '_blank' &&
+					!a.hasAttribute('download') &&
+					new URL(a.href, location).origin === location.origin &&
+					!e.defaultPrevented &&
+					e.button === 0 &&
+					!(e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+				);
+			}
+
+			// Retarget existing links – this covers keyboard navigation.
 			document.querySelectorAll('a[href]').forEach(a => {
-				addTargetBlank(a);
+				retargetLink(a);
 			});
 
-			// Set target="_blank" for external links when clicked.
+			// Retarget links when clicked.
 			// This covers links that are added after the page has loaded.
 			document.addEventListener('click', e => {
 				// window, document, SVG Text nodes etc. don't have the `closest` method
@@ -282,7 +312,14 @@ function playground_add_target_blank_to_external_links() {
 				}
 				const a = e.target.closest('a[href]');
 				if (!a) return;
-				addTargetBlank(a);
+				retargetLink(a);
+				if (opensInPlaygroundTab(e, a)) {
+					e.preventDefault();
+					window.parent.postMessage(
+						{ type: 'playground-open-tab', url: a.href },
+						parentOrigin
+					);
+				}
 			});
 
 			// Also handle focus events to cover keyboard navigation on
@@ -294,21 +331,21 @@ function playground_add_target_blank_to_external_links() {
 				}
 				const a = e.target?.closest('a[href]');
 				if (!a) return;
-				addTargetBlank(a);
+				retargetLink(a);
 			}, true);
 		}
 
 		if (document.readyState === 'loading') {
-			document.addEventListener('DOMContentLoaded', addTargetBlankToExternalLinks);
+			document.addEventListener('DOMContentLoaded', retargetPlaygroundLinks);
 		} else {
-			addTargetBlankToExternalLinks();
+			retargetPlaygroundLinks();
 		}
 	</script>
 
 	<?php
 }
-add_action('wp_head', 'playground_add_target_blank_to_external_links');
-add_action('admin_head', 'playground_add_target_blank_to_external_links');
+add_action('wp_head', 'playground_retarget_links');
+add_action('admin_head', 'playground_retarget_links');
 
 /**
  * Report the WordPress URL so the app can update its address bar without reading this frame.
@@ -350,7 +387,11 @@ function playground_report_url_to_parent() {
 			/** Publish the current URL, including replies to a late-subscribing parent. */
 			function reportPlaygroundUrl() {
 				window.parent.postMessage(
-					JSON.stringify({ type: 'playground-url-change', url: window.location.href }),
+					JSON.stringify({
+						type: 'playground-url-change',
+						url: window.location.href,
+						title: document.title,
+					}),
 					parentOrigin
 				);
 			}
