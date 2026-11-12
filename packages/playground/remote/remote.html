@@ -9,7 +9,7 @@
 
 			html,
 			body,
-			#wp {
+			.wp-frame {
 				height: 100%;
 				width: 100%;
 				margin: 0;
@@ -20,6 +20,70 @@
 			html,
 			body {
 				overflow: hidden;
+			}
+
+			/*
+			 * Prototype: tabs for WordPress links that ask for a new tab.
+			 * See src/lib/wordpress-tabs.ts. The strip is hidden until a second tab exists.
+			 */
+			.wp-frame[hidden],
+			.wp-tabs[hidden] {
+				display: none;
+			}
+			body.has-wp-tabs {
+				display: flex;
+				flex-direction: column;
+			}
+			body.has-wp-tabs .wp-frame {
+				flex: 1;
+				min-height: 0;
+			}
+			.wp-tabs {
+				display: flex;
+				flex: none;
+				gap: 2px;
+				padding: 4px 4px 0;
+				overflow-x: auto;
+				background: #1e1e1e;
+				font:
+					13px/1.4 -apple-system,
+					BlinkMacSystemFont,
+					'Segoe UI',
+					sans-serif;
+			}
+			.wp-tab {
+				display: flex;
+				align-items: center;
+				min-width: 0;
+				max-width: 240px;
+				border-radius: 6px 6px 0 0;
+				color: #c3c4c7;
+			}
+			.wp-tab.is-active {
+				background: #3c434a;
+				color: #fff;
+			}
+			.wp-tab button {
+				margin: 0;
+				border: 0;
+				background: none;
+				color: inherit;
+				font: inherit;
+				cursor: pointer;
+			}
+			.wp-tab button:focus-visible {
+				outline: 2px solid #fff;
+				outline-offset: -2px;
+			}
+			.wp-tab__label {
+				min-width: 0;
+				padding: 6px 10px;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.wp-tab__close {
+				padding: 6px 8px 6px 0;
 			}
 
 			body.has-error {
@@ -78,6 +142,7 @@
 	<body class="is-loading">
 		<iframe
 			id="wp"
+			class="wp-frame"
 			title="The WordPress site"
 			sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-modals"
 		></iframe>
