@@ -23,6 +23,7 @@ import { RELOAD_REQUIRED } from './shared-runtime';
 import { connectSharedRuntime } from './connect-shared-runtime';
 import { createWebMCPFrameBridge } from './webmcp-frame-bridge';
 import { requestWordPressUrl } from './request-wordpress-url';
+import { createWordPressTabs } from './wordpress-tabs';
 import type { ProgressBarOptions } from './progress-bar';
 import ProgressBar from './progress-bar';
 // @ts-ignore -- Vite resolves this URL import; ambient declarations break package consumers.
@@ -186,15 +187,17 @@ export async function bootPlaygroundRemote() {
 	let runStartupBlueprint = true;
 
 	const wpFrame = document.querySelector('#wp') as HTMLIFrameElement;
+	// Prototype: WordPress links that ask for a new tab open in more frames next to #wp.
+	// Navigation and URL reads below follow the active tab. The WebMCP bridge and the
+	// postMessage relay stay bound to #wp, the first tab.
+	const wpTabs = createWordPressTabs(wpFrame, wordPressSiteUrl);
 	// Pointer events stop at the WordPress document boundary. Accept messages from
-	// this #wp window at the WordPress origin, then dispatch a press in remote.html,
+	// our tab windows at the WordPress origin, then dispatch a press in remote.html,
 	// where the app's outside-click listeners can observe it. Checking the origin
 	// alone would also accept messages from other Playgrounds on that origin.
 	window.addEventListener('message', (event: MessageEvent) => {
-		if (
-			event.source !== wpFrame.contentWindow ||
-			event.origin !== wordPressSiteUrl
-		) {
+		const sourceFrame = wpTabs.frameForWindow(event.source);
+		if (!sourceFrame || event.origin !== wordPressSiteUrl) {
 			return;
 		}
 		let data;
@@ -208,10 +211,10 @@ export async function bootPlaygroundRemote() {
 			return;
 		}
 		if (data?.type === 'playground-pointer-relay-ready') {
-			// Confirm that #wp has a receiver before it marks its pointer relay active.
+			// Confirm that the tab has a receiver before it marks its pointer relay active.
 			// A nested editor frame sends to its WordPress parent, not here. Without
 			// this reply, it stays unmarked so readable frames keep native click handling.
-			wpFrame.contentWindow?.postMessage(
+			sourceFrame.contentWindow?.postMessage(
 				{ type: 'playground-enable-pointer-relay' },
 				wordPressSiteUrl
 			);
@@ -219,7 +222,7 @@ export async function bootPlaygroundRemote() {
 			// Bubble from the iframe element into remote.html's document. The app skips
 			// the original press in marked WordPress documents to avoid handling it twice.
 			// This synthetic event dismisses UI; it does not carry user activation.
-			wpFrame.dispatchEvent(
+			sourceFrame.dispatchEvent(
 				new PointerEvent('pointerdown', { bubbles: true })
 			);
 		}
@@ -308,13 +311,13 @@ export async function bootPlaygroundRemote() {
 			 * Receive the startup URL posted by the WordPress MU plugin in wp_head/admin_head.
 			 * Use the same messages for both origins, even when DOM reads would be allowed.
 			 * This also works when Document-Isolation-Policy blocks DOM access. Accept only
-			 * our #wp window at the expected origin, not another frame's URL report.
+			 * the active tab's window at the expected origin, not another frame's URL report.
 			 *
 			 * @see packages/playground/remote/src/lib/playground-mu-plugin/0-playground.php
 			 */
 			window.addEventListener('message', async (event) => {
 				if (
-					event.source !== wpFrame.contentWindow ||
+					event.source !== wpTabs.activeFrame().contentWindow ||
 					event.origin !== wordPressSiteUrl
 				) {
 					return;
@@ -344,8 +347,14 @@ export async function bootPlaygroundRemote() {
 			// Ask the current document rather than waiting for another navigation.
 			void reportCurrentPath();
 
+			// Switching tabs changes the WordPress page the app is looking at.
+			wpTabs.onActiveTabChange(() => void reportCurrentPath());
+
 			// Listen for iframe load events (for navigation)
-			wpFrame.addEventListener('load', async () => {
+			wpTabs.onFrameLoad(async (frame) => {
+				if (frame !== wpTabs.activeFrame()) {
+					return;
+				}
 				/**
 				 * When navigating to a page with %0A sequences (encoded newlines)
 				 * in the query string, the `location.href` property of the
@@ -398,8 +407,9 @@ export async function bootPlaygroundRemote() {
 				}
 			}
 		},
-		/** Navigate the WordPress frame and wait for its load event. */
+		/** Navigate the active WordPress tab and wait for its load event. */
 		async goTo(requestedPath: string) {
+			const frame = wpTabs.activeFrame();
 			if (!requestedPath.startsWith('/')) {
 				requestedPath = '/' + requestedPath;
 			}
@@ -417,7 +427,7 @@ export async function bootPlaygroundRemote() {
 				requestedPath = '/wp-admin/';
 			}
 			const newUrl = await playground.pathToInternalUrl(requestedPath);
-			const oldUrl = wpFrame.src;
+			const oldUrl = frame.src;
 
 			/**
 			 * Wait until the iframe loads. This prevents cancelled requests when multiple
@@ -429,16 +439,16 @@ export async function bootPlaygroundRemote() {
 			 *      the detailed context.
 			 */
 			const navigationComplete = new Promise<void>((resolve) => {
-				wpFrame.addEventListener('load', () => resolve(), {
+				frame.addEventListener('load', () => resolve(), {
 					once: true,
 				});
 			});
 
 			// If the URL is the same, we need to force a reload
 			// because otherwise the iframe will not reload the page.
-			if (newUrl === oldUrl && wpFrame.contentWindow) {
+			if (newUrl === oldUrl && frame.contentWindow) {
 				try {
-					wpFrame.contentWindow.location.href = newUrl;
+					frame.contentWindow.location.href = newUrl;
 					await navigationComplete;
 					return;
 				} catch {
@@ -446,23 +456,24 @@ export async function bootPlaygroundRemote() {
 					// environment with a restrictive CSP policy.
 				}
 			}
-			wpFrame.src = newUrl;
+			frame.src = newUrl;
 			await navigationComplete;
 		},
 		/**
-		 * Return the current WordPress path without waiting for the next navigation poll.
+		 * Return the active tab's WordPress path without waiting for the next navigation poll.
 		 * Ask the live document first: a cached report can predate a pushState() call.
 		 * If it does not reply, try a direct location read, then fall back to iframe.src.
 		 * That last fallback is only the requested URL; it may miss later navigation.
 		 */
 		async getCurrentURL() {
-			let url = await requestWordPressUrl(wpFrame, wordPressSiteUrl);
+			const frame = wpTabs.activeFrame();
+			let url = await requestWordPressUrl(frame, wordPressSiteUrl);
 			if (!url) {
 				// Plain HTML has no reporter; a loading or busy page can also miss the deadline.
 				// A live location read may still work. Across origins, only src may be available.
-				url = wpFrame.src;
+				url = frame.src;
 				try {
-					url = wpFrame.contentWindow?.location.href || url;
+					url = frame.contentWindow?.location.href || url;
 				} catch {
 					// StackBlitz and other restrictive CSPs can block even same-origin reads.
 					// Do not let a failed DOM read crash the remote frame.
@@ -477,7 +488,11 @@ export async function bootPlaygroundRemote() {
 			});
 		},
 		async setIframeSandboxFlags(flags: string[]) {
-			wpFrame.setAttribute('sandbox', flags.join(' '));
+			wpTabs
+				.frames()
+				.forEach((frame) =>
+					frame.setAttribute('sandbox', flags.join(' '))
+				);
 		},
 		async onWebMCPToolsChanged(fn) {
 			return webMCPBridge.subscribe(fn);
